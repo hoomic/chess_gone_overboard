@@ -26,6 +26,12 @@ def get_space_coordinates(src):
     gray = src
   # Apply adaptiveThreshold at the bitwise_not of gray, notice the ~ symbol
   gray = cv.bitwise_not(gray)
+
+  #increase contrast using CLAHE
+  clahe = cv.createCLAHE(clipLimit=3.0, tileGridSize=(30,30))
+  gray = clahe.apply(gray)
+  show_wait_destroy("clahe", gray)
+
   bw = cv.adaptiveThreshold(gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, \
                             cv.THRESH_BINARY, 5, -2)
 
@@ -46,7 +52,7 @@ def get_space_coordinates(src):
   #return space_coordinates
   cv.imshow("overlay", overlay)
   h_lo, h_hi, v_lo, v_hi = space_coordinates[0, 0]
-  show_wait_destroy("a1", src[h_lo:h_hi, v_lo:v_hi])
+  show_wait_destroy("a8", src[h_lo:h_hi, v_lo:v_hi])
 
 def get_edge_coordinates(original_image, horizontal):
   axis = 1 if horizontal else 0
@@ -96,8 +102,8 @@ def get_edge_coordinates(original_image, horizontal):
   i = 0
   j = 0
   while i < image.shape[axis]:
-    if edge_sum[i] <= 50:
-      while edge_sum[i + j] <= 50:
+    if edge_sum[i] <= 25:
+      while i + j < image.shape[axis] and edge_sum[i + j] <= 25:
         j += 1
       line_candidates.append(i + (j - 1)//2)
     i += j + 1
