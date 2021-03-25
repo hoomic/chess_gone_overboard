@@ -13,12 +13,13 @@ def show_wait_destroy(winname, img):
     cv.waitKey(0)
     cv.destroyWindow(winname)
 
-def get_space_coordinates(src):
+def get_space_coordinates(src, display=False):
   src = cv.resize(src, (300, 300), interpolation=cv.INTER_AREA)
   overlay = np.copy(src)
 
-  # Show source image
-  cv.imshow("src", src)
+  if display:
+    # Show source image
+    cv.imshow("src", src)
   # Transform source image to gray if it is not already
   if len(src.shape) != 2:
     gray = cv.cvtColor(src, cv.COLOR_BGR2GRAY)
@@ -28,16 +29,22 @@ def get_space_coordinates(src):
   gray = cv.bitwise_not(gray)
 
   #increase contrast using CLAHE
-  clahe = cv.createCLAHE(clipLimit=3.0, tileGridSize=(30,30))
+  tile_size = src.shape[0] // 10
+  clahe = cv.createCLAHE(clipLimit=4.0, tileGridSize=(tile_size, tile_size))
   gray = clahe.apply(gray)
-  show_wait_destroy("clahe", gray)
+  if display:
+    show_wait_destroy("clahe", gray)
 
   bw = cv.adaptiveThreshold(gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, \
                             cv.THRESH_BINARY, 5, -2)
 
+  if display:
+    show_wait_destroy("bw", bw)
+
+  edge_coordinates, h_edges, v_edges = get_board_edges(bw, display)
   # Create the images that will use to extract the horizontal and vertical lines
-  h_coordinates = get_edge_coordinates(bw, True)
-  v_coordinates = get_edge_coordinates(bw, False)
+  h_coordinates = get_grid_coordinates(h_edges, True, edge_coordinates, display)
+  v_coordinates = get_grid_coordinates(v_edges, False, edge_coordinates, display)
   for h in h_coordinates:
     overlay[h, :] = 0
   for v in v_coordinates:
@@ -49,12 +56,32 @@ def get_space_coordinates(src):
       space_coordinates[i, j] = np.array(
         [h_coordinates[i], h_coordinates[i + 1], v_coordinates[j], v_coordinates[j + 1]]
         )
-  #return space_coordinates
-  cv.imshow("overlay", overlay)
+  if display:
+    cv.imshow("overlay", overlay)
   h_lo, h_hi, v_lo, v_hi = space_coordinates[0, 0]
-  show_wait_destroy("a8", src[h_lo:h_hi, v_lo:v_hi])
+  if display:
+    show_wait_destroy("a8", src[h_lo:h_hi, v_lo:v_hi])
+  return space_coordinates
 
-def get_edge_coordinates(original_image, horizontal):
+def get_board_edges(original_image, display=False):
+  h_edges = get_edge_coordinates(original_image, True, display)
+  v_edges = get_edge_coordinates(original_image, False, display)
+
+  h_flatten = h_edges.mean(axis=0)
+  h_diff = np.diff(h_flatten)
+
+  v_flatten = v_edges.mean(axis=1)
+  v_diff = np.diff(v_flatten)  
+
+  v_lo = np.argmin(h_diff[:len(h_diff)//3])
+  v_hi = np.argmax(h_diff[2 * len(h_diff)//3:]) + 2 * len(v_diff) // 3
+
+  h_lo = np.argmin(v_diff[:len(v_diff)//3])
+  h_hi = np.argmax(v_diff[2 * len(v_diff)//3:]) + 2 * len(v_diff) // 3
+
+  return (h_lo-1, h_hi+1, v_lo-1, v_hi+1), h_edges, v_edges
+
+def get_edge_coordinates(original_image, horizontal, edge_coordinates, display=False):
   axis = 1 if horizontal else 0
   image = np.copy(original_image)
   dim = image.shape[axis]
@@ -74,8 +101,7 @@ def get_edge_coordinates(original_image, horizontal):
   3. src.copyTo(smooth)
   4. blur smooth img
   5. smooth.copyTo(src, edges)
-  6. detect vertical edges that run the length of the board
-  7. Find the 9 edges that are equal distant
+  6. detect edges that run the length of the board
   '''
   # Step 1
   edges = cv.adaptiveThreshold(image, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, \
@@ -83,6 +109,8 @@ def get_edge_coordinates(original_image, horizontal):
   # Step 2
   kernel = np.ones((2, 2), np.uint8)
   edges = cv.dilate(edges, kernel)
+  if display:
+    show_wait_destroy("edges", edges)
   # Step 3
   smooth = np.copy(image)
   # Step 4
@@ -90,18 +118,29 @@ def get_edge_coordinates(original_image, horizontal):
   # Step 5
   (rows, cols) = np.where(edges != 0)
   image[rows, cols] = smooth[rows, cols]
+  if display:
+    show_wait_destroy("smoothed", image)
+  return image
+
+def get_grid_coordinates(image, horizontal, edge_coordinates, display=False):
+  axis = 1 if horizontal else 0
+  lo = edge_coordinates[0] if horizontal else edge_coordinates[2]
+  hi = edge_coordinates[1] if horizontal else edge_coordinates[3]
+
   # Step 6
   whole_board_dim = (3, image.shape[1]) if horizontal else (image.shape[0], 3)
   whole_board_kernel = np.ones(whole_board_dim)/np.prod(whole_board_dim)
   image = cv.filter2D(image, -1, whole_board_kernel)
   _, image = cv.threshold(image, 230, 255, cv.THRESH_BINARY)
+  if display:
+    show_wait_destroy("whole_board", image)
 
   # Step 7
   edge_sum = np.sum(image, axis=axis)/ image.shape[axis]
   line_candidates = []
-  i = 0
+  i = lo
   j = 0
-  while i < image.shape[axis]:
+  while i < hi:
     if edge_sum[i] <= 25:
       while i + j < image.shape[axis] and edge_sum[i + j] <= 25:
         j += 1
@@ -151,4 +190,4 @@ if __name__ == "__main__":
   if src is None:
     print ('Error opening image: ' + argv[0])
 
-  get_space_coordinates(src)
+  get_space_coordinates(src, argv[1] == "--display")
