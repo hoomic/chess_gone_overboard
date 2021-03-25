@@ -86,7 +86,7 @@ def get_board_edges(original_image, display=False):
   h_lo = np.argmin(v_diff[:len(v_diff)//3])
   h_hi = np.argmax(v_diff[2 * len(v_diff)//3:]) + 2 * len(v_diff) // 3
 
-  return (h_lo-1, h_hi+1, v_lo-1, v_hi+1), h_edges, v_edges
+  return (h_lo-5, h_hi+5, v_lo-5, v_hi+5), h_edges, v_edges
 
 def get_edge_coordinates(original_image, horizontal, edge_coordinates, display=False):
   axis = 1 if horizontal else 0
