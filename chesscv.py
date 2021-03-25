@@ -189,5 +189,7 @@ if __name__ == "__main__":
   # Check if image is loaded fine
   if src is None:
     print ('Error opening image: ' + argv[0])
-
-  get_space_coordinates(src, argv[1] == "--display")
+  display = False
+  if len(argv) == 2:
+    display = argv[1] == "--display"
+  get_space_coordinates(src, display)
