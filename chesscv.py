@@ -42,6 +42,13 @@ def get_space_coordinates(src, display=False):
     show_wait_destroy("bw", bw)
 
   edge_coordinates, h_edges, v_edges = get_board_edges(bw, display)
+  if display:
+    h_lo, h_hi, v_lo, v_hi = edge_coordinates
+    overlay[h_lo, :] = 0
+    overlay[h_hi, :] = 0
+    overlay[:, v_lo] = 0
+    overlay[:, v_hi] = 0
+    show_wait_destroy('overlay', overlay)
   # Create the images that will use to extract the horizontal and vertical lines
   h_coordinates = get_grid_coordinates(h_edges, True, edge_coordinates, display)
   v_coordinates = get_grid_coordinates(v_edges, False, edge_coordinates, display)
