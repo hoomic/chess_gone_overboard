@@ -88,7 +88,7 @@ def get_board_edges(original_image, display=False):
 
   return (h_lo-5, h_hi+5, v_lo-5, v_hi+5), h_edges, v_edges
 
-def get_edge_coordinates(original_image, horizontal, edge_coordinates, display=False):
+def get_edge_coordinates(original_image, horizontal, display=False):
   axis = 1 if horizontal else 0
   image = np.copy(original_image)
   dim = image.shape[axis]
