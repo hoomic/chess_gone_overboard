@@ -206,12 +206,22 @@ class ChessBoard():
     hi = (self.resize // 8) + 1
     for i, c0 in enumerate(corners):
       x0, y0 = c0.ravel()
+      # filter out corners at edge of board
+      if x0 < 5 or x0 > (self.resize // 3) - 5:
+        continue
+      if y0 < 5 or y0 > (self.resize // 3) - 5:
+        continue
       if self.display:
         cv.circle(gray, (x0, y0), 3, 255, -1)
       for j, c1 in enumerate(corners):
         if j < i:
           continue
         x1, y1 = c1.ravel()
+        # filter out corners at edge of board
+        if x1 < 5 or x1 > (self.resize // 3) - 5:
+          continue
+        if y1 < 5 or y1 > (self.resize // 3) - 5:
+          continue
         # filter for distances between lo and hi pixels
         x_dist = np.abs(x0 - x1)
         if x_dist > lo and x_dist < hi:
