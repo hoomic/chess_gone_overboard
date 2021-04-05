@@ -61,15 +61,19 @@ def get_top_left(image):
 
 def variance_match_score(image, grid, params):
   x, y, s = params
-  variances = []
+  dark_pixels = []
+  light_pixels = []
   for i in range(9):
     x0 = (x + i * (s // 8)) + 5
     x1 = (x + (i + 1) * (s // 8)) - 5
     for j in range(9):
       y0 = (y + j * (s // 8)) + 5
       y1 = (y + (j + 1) * (s // 8)) - 5
-      variances.append(np.var(image[y0:y1,x0:x1]))
-  return np.median(variances)
+      if i % 2 == j % 2:
+        light_pixels.extend(list(image[y0:y1,x0:x1].flatten()))
+      else:
+        dark_pixels.extend(list(image[y0:y1,x0:x1].flatten()))
+  return np.var(light_pixels) + np.var(dark_pixels)
 
 def overlap_match_score(image, grid, params):
   return np.mean(np.abs(np.subtract(image, grid)))
@@ -135,15 +139,16 @@ class ChessBoard():
       
     top_10 = list(sorted(grids, key=lambda x: x[0]))[:10]
     cv.imshow("image", edges)
-    for score, grid, param in top_10:
+    for score, grid, params in top_10:
       overlay = np.copy(gray)
       overlay = np.maximum(overlay, grid)
-      cv.imshow('overlay', overlay)
-      new_score = variance_match_score(edges, grid, param)
+      new_score = variance_match_score(gray, grid, params)
+      if self.display:
+        show_wait_destroy(str(new_score), overlay)
       if new_score < best_score:
         best_grid = grid
         best_params = params
-        best_score = score
+        best_score = new_score
     overlay = np.copy(gray)
     overlay = np.maximum(overlay, best_grid)
     show_wait_destroy('best', overlay)
@@ -248,7 +253,7 @@ class ChessBoard():
       x, y = c.ravel()
       top_left_coordinates.append((x, y))
       if self.display:
-        cv.circle(image, (x, y), 3, 255, -1)
+        cv.circle(image, (x, y), 2, 255, -1)
     if self.display:
       show_wait_destroy("top_left", image)
     return top_left_coordinates
