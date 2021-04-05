@@ -7,182 +7,250 @@ import numpy as np
 import sys
 import cv2 as cv
 
+def make_grid():
+  """ make a 8x8 grid for feature matching """
+  dim = 300
+  buffer = 30
+  gap = (dim - 2 * buffer) // 8
+  grid = np.zeros((dim, dim), dtype=np.uint8)
+  for i in range(9):
+    coord = int(buffer + i * gap)
+    cv.line(grid, (buffer, coord), (dim - buffer, coord), 255, 1)
+    cv.line(grid, (coord, buffer), (coord, dim - buffer), 255, 1)
+  return grid
+
 def show_wait_destroy(winname, img):
     cv.imshow(winname, img)
     cv.moveWindow(winname, 500, 0)
     cv.waitKey(0)
     cv.destroyWindow(winname)
 
-def get_space_coordinates(src, display=False):
-  src = cv.resize(src, (300, 300), interpolation=cv.INTER_AREA)
-  overlay = np.copy(src)
+def generate_grid(x, y, s):
+  grid = np.zeros((300, 300), dtype=np.uint8)
+  if x + s > 300 or y + s > 300:
+    return None
+  for i in range(9):
+    # "horizontal" line
+    y0 = int(y + i * s / 8 )
+    x1 = int(x + s)
+    cv.line(grid, (x, y0), (x1, y0), 255, 1)
 
-  if display:
-    # Show source image
-    cv.imshow("src", src)
-  # Transform source image to gray if it is not already
-  if len(src.shape) != 2:
-    gray = cv.cvtColor(src, cv.COLOR_BGR2GRAY)
-  else:
-    gray = src
-  # Apply adaptiveThreshold at the bitwise_not of gray, notice the ~ symbol
-  gray = cv.bitwise_not(gray)
+    # "vertical" line
+    x0 = int(x + i * s / 8)
+    y1 = int(y + s)
+    cv.line(grid, (x0, y), (x0, y1), 255, 1)
+  return grid
+  #show_wait_destroy("grid", grid)
 
-  #increase contrast using CLAHE
-  tile_size = src.shape[0] // 10
-  clahe = cv.createCLAHE(clipLimit=4.0, tileGridSize=(tile_size, tile_size))
-  gray = clahe.apply(gray)
-  if display:
-    show_wait_destroy("clahe", gray)
+def generate_grids(top_left_coordinates, side_length):
+  for x, y in top_left_coordinates:
+    for s in range(side_length - 5, side_length + 5, 1):
+      yield generate_grid(x, y, s), (x, y, s)
 
-  bw = cv.adaptiveThreshold(gray, 255, cv.ADAPTIVE_THRESH_MEAN_C, \
-                            cv.THRESH_BINARY, 5, -2)
+def get_center(image):
+  center = np.copy(image)
+  dim = center.shape[0]
+  third = int(dim / 3)
+  return center[third:dim - third, third:dim - third]
 
-  if display:
-    show_wait_destroy("bw", bw)
+def get_top_left(image):
+  center = np.copy(image)
+  dim = center.shape[0]
+  third = int(dim / 3)
+  return center[:third, :third]
 
-  edge_coordinates, h_edges, v_edges = get_board_edges(bw, display)
-  if display:
-    h_lo, h_hi, v_lo, v_hi = edge_coordinates
-    overlay[h_lo, :] = 0
-    overlay[h_hi, :] = 0
-    overlay[:, v_lo] = 0
-    overlay[:, v_hi] = 0
-    show_wait_destroy('overlay', overlay)
-  # Create the images that will use to extract the horizontal and vertical lines
-  h_coordinates = get_grid_coordinates(h_edges, True, edge_coordinates, display)
-  v_coordinates = get_grid_coordinates(v_edges, False, edge_coordinates, display)
-  for h in h_coordinates:
-    overlay[h, :] = 0
-  for v in v_coordinates:
-    overlay[:, v] = 0
-  #import pdb; pdb.set_trace()
-  space_coordinates = np.empty((8,8,4), dtype=int)
-  for i in range(8):
-    for j in range(8):
-      space_coordinates[i, j] = np.array(
-        [h_coordinates[i], h_coordinates[i + 1], v_coordinates[j], v_coordinates[j + 1]]
-        )
-  if display:
-    cv.imshow("overlay", overlay)
-  h_lo, h_hi, v_lo, v_hi = space_coordinates[0, 0]
-  if display:
-    show_wait_destroy("a8", src[h_lo:h_hi, v_lo:v_hi])
-  return space_coordinates
+def variance_match_score(image, grid, params):
+  x, y, s = params
+  variances = []
+  for i in range(9):
+    x0 = (x + i * (s // 8)) + 5
+    x1 = (x + (i + 1) * (s // 8)) - 5
+    for j in range(9):
+      y0 = (y + j * (s // 8)) + 5
+      y1 = (y + (j + 1) * (s // 8)) - 5
+      variances.append(np.var(image[y0:y1,x0:x1]))
+  return np.median(variances)
 
-def get_board_edges(original_image, display=False):
-  h_edges = get_edge_coordinates(original_image, True, display)
-  v_edges = get_edge_coordinates(original_image, False, display)
+def overlap_match_score(image, grid, params):
+  return np.mean(np.abs(np.subtract(image, grid)))
 
-  h_flatten = h_edges.mean(axis=0)
-  h_diff = np.diff(h_flatten)
+class ChessBoard():
+  def __init__(self, resize=300, display=False):
+    self.resize = resize
+    self.display = display
 
-  v_flatten = v_edges.mean(axis=1)
-  v_diff = np.diff(v_flatten)  
+  def get_space_coordinates(self, src):
+    src = cv.resize(src, (self.resize, self.resize), interpolation=cv.INTER_AREA)
+    overlay = np.copy(src)
 
-  v_lo = np.argmin(h_diff[:len(h_diff)//3])
-  v_hi = np.argmax(h_diff[2 * len(h_diff)//3:]) + 2 * len(v_diff) // 3
+    if self.display:
+      # Show source image
+      cv.imshow("src", src)
 
-  h_lo = np.argmin(v_diff[:len(v_diff)//3])
-  h_hi = np.argmax(v_diff[2 * len(v_diff)//3:]) + 2 * len(v_diff) // 3
+    # Transform source image to gray if it is not already
+    if len(src.shape) != 2:
+      gray = cv.cvtColor(src, cv.COLOR_BGR2GRAY)
+    else:
+      gray = src
+    # Apply adaptiveThreshold at the bitwise_not of gray, notice the ~ symbol
+    gray = cv.bitwise_not(gray)
 
-  return (h_lo-5, h_hi+5, v_lo-5, v_hi+5), h_edges, v_edges
+    #increase contrast using CLAHE
+    tile_size = self.resize // 100
+    clahe = cv.createCLAHE(clipLimit=0.001, tileGridSize=(tile_size, tile_size))
+    gray = clahe.apply(gray)
+    if self.display:
+      show_wait_destroy("clahe", gray)
 
-def get_edge_coordinates(original_image, horizontal, display=False):
-  axis = 1 if horizontal else 0
-  image = np.copy(original_image)
-  dim = image.shape[axis]
-  size = dim // 30
-  # Create structure element for extracting lines through morphology operations
-  structure_dim = (size, 1) if horizontal else (1, size)
-  structure = cv.getStructuringElement(cv.MORPH_RECT, structure_dim)
-  # Apply morphology operations
-  image = cv.erode(image, structure)
-  image = cv.dilate(image, structure)
+    # get the center 9th of the board
+    center = get_center(gray)
 
-  image = cv.bitwise_not(image)
-  '''
-  Extract edges and smooth image according to the logic
-  1. extract edges
-  2. dilate(edges)
-  3. src.copyTo(smooth)
-  4. blur smooth img
-  5. smooth.copyTo(src, edges)
-  6. detect edges that run the length of the board
-  '''
-  # Step 1
-  edges = cv.adaptiveThreshold(image, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, \
-                              cv.THRESH_BINARY, 3, -2)
-  # Step 2
-  kernel = np.ones((2, 2), np.uint8)
-  edges = cv.dilate(edges, kernel)
-  if display:
-    show_wait_destroy("edges", edges)
-  # Step 3
-  smooth = np.copy(image)
-  # Step 4
-  smooth = cv.blur(smooth, (2, 2))
-  # Step 5
-  (rows, cols) = np.where(edges != 0)
-  image[rows, cols] = smooth[rows, cols]
-  if display:
-    show_wait_destroy("smoothed", image)
-  return image
+    # get the board angle
+    self.set_camera_angle(-np.degrees(self.get_board_angle(center, 50)))
+    
+    #rotate the image by that angle
+    gray = self.rotate_image(gray)
+    center = self.rotate_image(center)
 
-def get_grid_coordinates(image, horizontal, edge_coordinates, display=False):
-  axis = 1 if horizontal else 0
-  lo = edge_coordinates[0] if horizontal else edge_coordinates[2]
-  hi = edge_coordinates[1] if horizontal else edge_coordinates[3]
+    self.side_length = self.get_board_side_length(center)
 
-  # Step 6
-  whole_board_dim = (3, image.shape[1]) if horizontal else (image.shape[0], 3)
-  whole_board_kernel = np.ones(whole_board_dim)/np.prod(whole_board_dim)
-  image = cv.filter2D(image, -1, whole_board_kernel)
-  _, image = cv.threshold(image, 230, 255, cv.THRESH_BINARY)
-  if display:
-    show_wait_destroy("whole_board", image)
+    top_left = get_top_left(gray)
+    top_left_coordinates = self.get_top_left_coordinates(top_left)
 
-  # Step 7
-  edge_sum = np.sum(image, axis=axis)/ image.shape[axis]
-  line_candidates = []
-  i = lo
-  j = 0
-  while i < hi:
-    if edge_sum[i] <= 25:
-      while i + j < image.shape[axis] and edge_sum[i + j] <= 25:
-        j += 1
-      line_candidates.append(i + (j - 1)//2)
-    i += j + 1
-    j = 0
+    print("THETA", self.camera_angle)
+    print("SIDE LENGTH", self.side_length)
+    
+    edges = cv.Canny(gray, 20, 150, apertureSize = 3)
+    if self.display:
+      show_wait_destroy("edges", edges)
+    grids = []
+    best_grid = None
+    best_params = None
+    best_score = 1e6
+    for grid, params in generate_grids(top_left_coordinates, self.side_length):
+      if grid is None:
+        continue 
+      score = overlap_match_score(edges, grid, params)
+      grids.append((score, grid, params))
+      
+    top_10 = list(sorted(grids, key=lambda x: x[0]))[:10]
+    cv.imshow("image", edges)
+    for score, grid, param in top_10:
+      overlay = np.copy(gray)
+      overlay = np.maximum(overlay, grid)
+      cv.imshow('overlay', overlay)
+      new_score = variance_match_score(edges, grid, param)
+      if new_score < best_score:
+        best_grid = grid
+        best_params = params
+        best_score = score
+    overlay = np.copy(gray)
+    overlay = np.maximum(overlay, best_grid)
+    show_wait_destroy('best', overlay)
+    return
 
-  diffs = np.subtract(line_candidates[1:], line_candidates[:-1])
-  filtered_diffs, space_width, max_dist = filter_differences(diffs)
+  def get_board_angle(self, orig_gray, threshold):
+    """ 
+    Finds the angular orientation of the board by looking at the center 9th
+    of the image and detecting all the lines in that image. Filter for lines
+    that are approximately vertical or horizontal and then convert the vertical
+    angles into horizontal ones. Collect all angles and use the median angle as
+    the best guess for the angle of the board
+    """
+    gray = np.copy(orig_gray)
+    edges = np.copy(gray)
+    #first detect edges using Canny
+    edges = cv.Canny(edges, 10, 150, apertureSize = 3)
+    if self.display:
+      cv.imshow("edges", edges)
+    # then detect lines using a Hough transform
+    lines = cv.HoughLinesP(edges, 1, np.pi/180, threshold=threshold, minLineLength=10, maxLineGap=10)
+    thetas = []
+    for line in lines:
+      x1, y1, x2, y2 = line[0]
+      # calculate the angle of every line
+      theta = np.arctan(np.divide(y2 - y1, x2 - x1))
+      # There may be some noise, so filter all lines that aren't approximately vertical or horizontal
+      if abs(theta) > 0.2 and abs(theta + np.pi/2) > 0.2:
+        continue
+      if self.display:
+        cv.line(gray, (x1, y1), (x2, y2), 255, 1)
+      # Convert all vertical angles into horizontal angles
+      if abs(theta) > 0.2: # theta ~= -pi/2
+        theta += np.pi/2
+      thetas.append(theta)
+    # if we didn't find any lines, then try again with half the threshold
+    if not len(thetas):
+      return get_hough_lines(gray, threshold//2)
+    if self.display:
+      show_wait_destroy("center_lines", gray)
+    # The Hough transforma measures the angle in the opposite direction of 
+    # generate_grid, so take the negation here
+    return -np.median(thetas)
 
-  line_indices = np.where(np.abs(diffs - space_width) <= max_dist)[0]
-  coordinates = []
-  for i in line_indices:
-    coordinates.append(line_candidates[i])
-  coordinates.append(int(line_candidates[line_indices[-1]] + filtered_diffs[-1]))
-  return coordinates
+  def get_board_side_length(self, orig_gray):
+    """
+    Finds the side length of the board by looking at the center 9th of the
+    image and detecting the 15 pixels that are most likely to be corners of 
+    a square. We assume that the board takes up more than 40% of each dimension
+    and that it fits within the image. This function guesses that the side length
+    of a square is the median of all distances that are found within 15 and 38 pixels
+    """
+    gray = np.copy(orig_gray)
+    # detect 15 most likely corners
+    corners = cv.goodFeaturesToTrack(gray, 15, 0.0001, 15)
+    corners = np.int0(corners)
+    # calculate distance from each corner to every other corner
+    distances = []
+    lo = self.resize // 20
+    hi = (self.resize // 8) + 1
+    for i, c0 in enumerate(corners):
+      x0, y0 = c0.ravel()
+      if self.display:
+        cv.circle(gray, (x0, y0), 3, 255, -1)
+      for j, c1 in enumerate(corners):
+        if j < i:
+          continue
+        x1, y1 = c1.ravel()
+        # filter for distances between lo and hi pixels
+        x_dist = np.abs(x0 - x1)
+        if x_dist > lo and x_dist < hi:
+          distances.append(x_dist)
+        y_dist = np.abs(y0 - y1)
+        if y_dist > lo and y_dist < hi:
+          distances.append(y_dist)
+    if self.display:
+      show_wait_destroy("center corners", gray)
+    # take median of distances and multiply by 8 for entire board side length
+    return int(np.median(distances) * 8)
 
-def filter_differences(diffs):
-  #first filter out all the edges that are one pixel
-  filtered_diffs = diffs[diffs != 1]
-  # for each unique difference value, calculate the average absolute distance 
-  # to the 8 nearest diff values
-  min_value = None
-  min_dist = 1e6
+  def get_top_left_coordinates(self, gray):
+    """
+    Finds the 100 most likely positions of the top left corner of the board.
+    This function looks at the top left 9th of the image and detects the 100
+    pixels that are most likely to be corners. 
+    """
+    image = cv.Canny(gray, 50, 150, apertureSize=3)
+    corners = cv.goodFeaturesToTrack(gray, 100, 0.0001, 5)
+    corners = np.int0(corners)
+    top_left_coordinates = []
+    for i, c in enumerate(corners):
+      x, y = c.ravel()
+      top_left_coordinates.append((x, y))
+      if self.display:
+        cv.circle(image, (x, y), 3, 255, -1)
+    if self.display:
+      show_wait_destroy("top_left", image)
+    return top_left_coordinates
 
-  for candidate in np.unique(filtered_diffs):
-    distances = np.abs(filtered_diffs - candidate)
-    distances.sort()
-    distance = np.mean(distances[:8])
-    if distance < min_dist:
-      min_value = candidate
-      min_dist = distance
-      max_dist = np.max(distances[:8])
-  filtered_diffs = [d for d in filtered_diffs if np.abs(d - min_value) <= max_dist]
-  return filtered_diffs, min_value, max_dist
+  def set_camera_angle(self, angle):
+    (cX, cY) = (self.resize // 2, self.resize // 2)
+    self.rotation_matrix = cv.getRotationMatrix2D((cX, cY), angle, 1.0)
+    self.camera_angle = angle
+
+  def rotate_image(self, image):
+    rotate = np.copy(image)
+    return cv.warpAffine(rotate, self.rotation_matrix, (self.resize, self.resize))
 
 if __name__ == "__main__":
   # [load_image]
@@ -199,4 +267,5 @@ if __name__ == "__main__":
   display = False
   if len(argv) == 2:
     display = argv[1] == "--display"
-  get_space_coordinates(src, display)
+  chessboard = ChessBoard(300, display)
+  chessboard.get_space_coordinates(src)
