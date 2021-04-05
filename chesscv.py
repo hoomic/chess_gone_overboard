@@ -203,7 +203,7 @@ class ChessBoard():
     """
     gray = np.copy(orig_gray)
     # detect 15 most likely corners
-    corners = cv.goodFeaturesToTrack(gray, 15, 0.0001, 15)
+    corners = cv.goodFeaturesToTrack(gray, 20, 0.00001, self.resize // 20)
     corners = np.int0(corners)
     # calculate distance from each corner to every other corner
     distances = []
