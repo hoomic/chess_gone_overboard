@@ -101,7 +101,7 @@ class ChessBoard():
 
     #increase contrast using CLAHE
     tile_size = self.resize // 100
-    clahe = cv.createCLAHE(clipLimit=0.001, tileGridSize=(tile_size, tile_size))
+    clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(tile_size, tile_size))
     gray = clahe.apply(gray)
     if self.display:
       show_wait_destroy("clahe", gray)
