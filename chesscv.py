@@ -101,7 +101,7 @@ class ChessBoard():
 
     #increase contrast using CLAHE
     tile_size = self.resize // 100
-    clahe = cv.createCLAHE(clipLimit=2.0, tileGridSize=(tile_size, tile_size))
+    clahe = cv.createCLAHE(clipLimit=10.0, tileGridSize=(tile_size, tile_size))
     gray = clahe.apply(gray)
     if self.display:
       show_wait_destroy("clahe", gray)
@@ -138,7 +138,6 @@ class ChessBoard():
       grids.append((score, grid, params))
       
     top_10 = list(sorted(grids, key=lambda x: x[0]))[:10]
-    cv.imshow("image", edges)
     for score, grid, params in top_10:
       overlay = np.copy(gray)
       overlay = np.maximum(overlay, grid)
@@ -203,7 +202,7 @@ class ChessBoard():
     """
     gray = np.copy(orig_gray)
     # detect 15 most likely corners
-    corners = cv.goodFeaturesToTrack(gray, 20, 0.00001, self.resize // 20)
+    corners = cv.goodFeaturesToTrack(gray, 20, 0.0001, self.resize // 20)
     corners = np.int0(corners)
     # calculate distance from each corner to every other corner
     distances = []
