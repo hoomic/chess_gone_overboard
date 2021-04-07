@@ -1,23 +1,10 @@
 """
 @file chesscv.py
-@brief Use morphology transformations for extracting horizontal and vertical lines to
-       detect the spaces on a chess board
+@brief 
 """
 import numpy as np
 import sys
 import cv2 as cv
-
-def make_grid():
-  """ make a 8x8 grid for feature matching """
-  dim = 300
-  buffer = 30
-  gap = (dim - 2 * buffer) // 8
-  grid = np.zeros((dim, dim), dtype=np.uint8)
-  for i in range(9):
-    coord = int(buffer + i * gap)
-    cv.line(grid, (buffer, coord), (dim - buffer, coord), 255, 1)
-    cv.line(grid, (coord, buffer), (coord, dim - buffer), 255, 1)
-  return grid
 
 def show_wait_destroy(winname, img):
     cv.imshow(winname, img)
@@ -25,39 +12,28 @@ def show_wait_destroy(winname, img):
     cv.waitKey(0)
     cv.destroyWindow(winname)
 
-def generate_grid(x, y, s):
-  grid = np.zeros((300, 300), dtype=np.uint8)
-  if x + s > 300 or y + s > 300:
-    return None
+def generate_grid_coordinates(x, y, s):
+  coordinates = []
   for i in range(9):
-    # "horizontal" line
-    y0 = int(y + i * s / 8 )
-    x1 = int(x + s)
-    cv.line(grid, (x, y0), (x1, y0), 255, 1)
+    x0 = x + i * s
+    for j in range(9):
+      coordinates.append((x0, y + j * s))
+  return coordinates
 
-    # "vertical" line
-    x0 = int(x + i * s / 8)
-    y1 = int(y + s)
-    cv.line(grid, (x0, y), (x0, y1), 255, 1)
-  return grid
-  #show_wait_destroy("grid", grid)
-
-def generate_grids(top_left_coordinates, side_length):
-  for x, y in top_left_coordinates:
-    for s in range(side_length - 5, side_length + 5, 1):
-      yield generate_grid(x, y, s), (x, y, s)
+def generate_grids(center_corners, square_length):
+  for Cx, Cy in center_corners:
+    for s in range(square_length - 2, square_length + 3):
+      for i in range(4):
+        x = Cx - i * s
+        for j in range(4):
+          y = Cy - j * s
+          yield generate_grid_coordinates(x, y, s), (x, y, s)
 
 def get_center(image):
   center = np.copy(image)
   dim = center.shape[0]
   third = int(dim / 3)
   return center[third:dim - third, third:dim - third]
-
-def get_top_left(image):
-  center = np.copy(image)
-  dim = center.shape[0]
-  third = int(dim / 3)
-  return center[:third, :third]
 
 def variance_match_score(image, grid, params):
   x, y, s = params
@@ -75,8 +51,12 @@ def variance_match_score(image, grid, params):
         dark_pixels.extend(list(image[y0:y1,x0:x1].flatten()))
   return np.var(light_pixels) + np.var(dark_pixels)
 
-def overlap_match_score(image, grid, params):
-  return np.mean(np.abs(np.subtract(image, grid)))
+def overlap_match_score(corners, grid, params):
+  corners = np.array(corners)
+  grid = np.array(grid)
+  distance_matrix = np.linalg.norm(corners[:, None, :] - grid[None, :, :], axis=-1)
+  min_distances = np.min(distance_matrix, axis=0)
+  return np.mean(min_distances)
 
 class ChessBoard():
   def __init__(self, resize=300, display=False):
@@ -103,6 +83,7 @@ class ChessBoard():
     tile_size = self.resize // 100
     clahe = cv.createCLAHE(clipLimit=10.0, tileGridSize=(tile_size, tile_size))
     gray = clahe.apply(gray)
+    gray = cv.bilateralFilter(gray,5,50,50)
     if self.display:
       show_wait_destroy("clahe", gray)
 
@@ -116,40 +97,32 @@ class ChessBoard():
     gray = self.rotate_image(gray)
     center = self.rotate_image(center)
 
-    self.side_length = self.get_board_side_length(center)
+    #find the best guess at square lengths 
+    square_length, center_corners = self.get_board_side_length(center)
+    self.side_length = int(square_length * 8)
 
-    top_left = get_top_left(gray)
-    top_left_coordinates = self.get_top_left_coordinates(top_left)
+    #find all corners on the board
+    all_corners = self.detect_corners(gray, square_length)
 
     print("THETA", self.camera_angle)
     print("SIDE LENGTH", self.side_length)
     
-    edges = cv.Canny(gray, 20, 150, apertureSize = 3)
-    if self.display:
-      show_wait_destroy("edges", edges)
     grids = []
     best_grid = None
     best_params = None
     best_score = 1e6
-    for grid, params in generate_grids(top_left_coordinates, self.side_length):
+    for grid, params in generate_grids(center_corners, square_length):
       if grid is None:
         continue 
-      score = overlap_match_score(edges, grid, params)
-      grids.append((score, grid, params))
-      
-    top_10 = list(sorted(grids, key=lambda x: x[0]))[:10]
-    for score, grid, params in top_10:
-      overlay = np.copy(gray)
-      overlay = np.maximum(overlay, grid)
-      new_score = variance_match_score(gray, grid, params)
-      if self.display:
-        show_wait_destroy(str(new_score), overlay)
-      if new_score < best_score:
+      score = overlap_match_score(all_corners, grid, params)
+      if score < best_score:
         best_grid = grid
         best_params = params
-        best_score = new_score
+        best_score = score
+      grids.append((score, grid, params))
     overlay = np.copy(gray)
-    overlay = np.maximum(overlay, best_grid)
+    for x, y in best_grid:
+      cv.circle(overlay, (x, y), 3, 255, -1)
     show_wait_destroy('best', overlay)
     return
 
@@ -164,7 +137,7 @@ class ChessBoard():
     gray = np.copy(orig_gray)
     edges = np.copy(gray)
     #first detect edges using Canny
-    edges = cv.Canny(edges, 10, 150, apertureSize = 3)
+    edges = cv.Canny(edges, 100, 150, apertureSize = 3)
     if self.display:
       cv.imshow("edges", edges)
     # then detect lines using a Hough transform
@@ -206,6 +179,7 @@ class ChessBoard():
     corners = np.int0(corners)
     # calculate distance from each corner to every other corner
     distances = []
+    filtered_corners = []
     lo = self.resize // 20
     hi = (self.resize // 8) + 1
     for i, c0 in enumerate(corners):
@@ -230,32 +204,37 @@ class ChessBoard():
         x_dist = np.abs(x0 - x1)
         if x_dist > lo and x_dist < hi:
           distances.append(x_dist)
+          filtered_corners.append((x0 + self.resize // 3, y0 + self.resize // 3))
         y_dist = np.abs(y0 - y1)
         if y_dist > lo and y_dist < hi:
           distances.append(y_dist)
+          filtered_corners.append((x0 + self.resize // 3, y0 + self.resize // 3))
     if self.display:
       show_wait_destroy("center corners", gray)
+      gray = np.copy(orig_gray)
+      for x, y in filtered_corners:
+        cv.circle(gray, (x - self.resize // 3, y - self.resize // 3), 3, 255, -1)
+      show_wait_destroy("filtered_corners", gray)
     # take median of distances and multiply by 8 for entire board side length
-    return int(np.median(distances) * 8)
+    return int(np.median(distances)), filtered_corners
 
-  def get_top_left_coordinates(self, gray):
+  def detect_corners(self, gray, square_length):
     """
-    Finds the 100 most likely positions of the top left corner of the board.
-    This function looks at the top left 9th of the image and detects the 100
-    pixels that are most likely to be corners. 
+    Detect all corners in the grayscale image, and make sure they are all at least
+    square_length - 1 apart.
     """
-    image = cv.Canny(gray, 50, 150, apertureSize=3)
-    corners = cv.goodFeaturesToTrack(gray, 100, 0.0001, 5)
+    image = np.copy(gray)
+    corners = cv.goodFeaturesToTrack(gray, 120, 0.001, square_length - 1)
     corners = np.int0(corners)
-    top_left_coordinates = []
+    all_corners = []
     for i, c in enumerate(corners):
       x, y = c.ravel()
-      top_left_coordinates.append((x, y))
+      all_corners.append((x, y))
       if self.display:
         cv.circle(image, (x, y), 2, 255, -1)
     if self.display:
-      show_wait_destroy("top_left", image)
-    return top_left_coordinates
+      show_wait_destroy("all_corners", image)
+    return all_corners
 
   def set_camera_angle(self, angle):
     (cX, cY) = (self.resize // 2, self.resize // 2)
