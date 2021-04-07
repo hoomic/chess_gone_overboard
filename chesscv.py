@@ -23,9 +23,9 @@ def generate_grid_coordinates(x, y, s):
 def generate_grids(center_corners, square_length):
   for Cx, Cy in center_corners:
     for s in range(square_length - 2, square_length + 3):
-      for i in range(4):
+      for i in range(2,5):
         x = Cx - i * s
-        for j in range(4):
+        for j in range(2,5):
           y = Cy - j * s
           yield generate_grid_coordinates(x, y, s), (x, y, s)
 
@@ -35,22 +35,6 @@ def get_center(image):
   third = int(dim / 3)
   return center[third:dim - third, third:dim - third]
 
-def variance_match_score(image, grid, params):
-  x, y, s = params
-  dark_pixels = []
-  light_pixels = []
-  for i in range(9):
-    x0 = (x + i * (s // 8)) + 5
-    x1 = (x + (i + 1) * (s // 8)) - 5
-    for j in range(9):
-      y0 = (y + j * (s // 8)) + 5
-      y1 = (y + (j + 1) * (s // 8)) - 5
-      if i % 2 == j % 2:
-        light_pixels.extend(list(image[y0:y1,x0:x1].flatten()))
-      else:
-        dark_pixels.extend(list(image[y0:y1,x0:x1].flatten()))
-  return np.var(light_pixels) + np.var(dark_pixels)
-
 def overlap_match_score(corners, grid, params):
   corners = np.array(corners)
   grid = np.array(grid)
@@ -58,12 +42,25 @@ def overlap_match_score(corners, grid, params):
   min_distances = np.min(distance_matrix, axis=0)
   return np.mean(min_distances)
 
+class Square():
+  """
+  object for a single square on the board
+  """
+  def __init__(self, board_coords, image_coords):
+    self.board_coords = board_coords
+    self.image_coords = image_coords
+    self.piece = '.'
+
+  def display(self, image):
+    x0, x1, y0, y1 = self.image_coords
+    show_wait_destroy("{},{}".format(*self.board_coords), image[y0:y1,x0:x1])
+
 class ChessBoard():
   def __init__(self, resize=300, display=False):
     self.resize = resize
     self.display = display
 
-  def get_space_coordinates(self, src):
+  def locate_squares(self, src):
     src = cv.resize(src, (self.resize, self.resize), interpolation=cv.INTER_AREA)
     overlay = np.copy(src)
 
@@ -98,14 +95,11 @@ class ChessBoard():
     center = self.rotate_image(center)
 
     #find the best guess at square lengths 
-    square_length, center_corners = self.get_board_side_length(center)
+    square_length, center_corners = self.get_square_length(center)
     self.side_length = int(square_length * 8)
 
     #find all corners on the board
     all_corners = self.detect_corners(gray, square_length)
-
-    print("THETA", self.camera_angle)
-    print("SIDE LENGTH", self.side_length)
     
     grids = []
     best_grid = None
@@ -120,11 +114,13 @@ class ChessBoard():
         best_params = params
         best_score = score
       grids.append((score, grid, params))
-    overlay = np.copy(gray)
-    for x, y in best_grid:
-      cv.circle(overlay, (x, y), 3, 255, -1)
-    show_wait_destroy('best', overlay)
-    return
+    self.best_grid = best_grid
+    if self.display:
+      self.overlay_grid(gray)
+    self.set_board_coordinates(best_params)
+    if self.display:
+      for square in self.squares:
+        square.display(src)
 
   def get_board_angle(self, orig_gray, threshold):
     """ 
@@ -165,13 +161,14 @@ class ChessBoard():
     # generate_grid, so take the negation here
     return -np.median(thetas)
 
-  def get_board_side_length(self, orig_gray):
+  def get_square_length(self, orig_gray):
     """
-    Finds the side length of the board by looking at the center 9th of the
+    Finds the length/width of each square by looking at the center 9th of the
     image and detecting the 15 pixels that are most likely to be corners of 
     a square. We assume that the board takes up more than 40% of each dimension
     and that it fits within the image. This function guesses that the side length
-    of a square is the median of all distances that are found within 15 and 38 pixels
+    of a square is the median of all distances that are found within greater than
+    1/20 of the image (8/20=40%) and less than 1/8 of the board (8/8=100%)
     """
     gray = np.copy(orig_gray)
     # detect 15 most likely corners
@@ -245,6 +242,23 @@ class ChessBoard():
     rotate = np.copy(image)
     return cv.warpAffine(rotate, self.rotation_matrix, (self.resize, self.resize))
 
+  def set_board_coordinates(self, params):
+    self.squares = []
+    x, y ,s = params
+    for i in range(8):
+      x_lo = x + i * s
+      x_hi = x + (i + 1) * s
+      for j in range(8):
+        y_lo = y + j * s
+        y_hi = y + (j + 1) * s
+        self.squares.append(Square((i, j), (x_lo, x_hi, y_lo, y_hi)))
+  
+  def overlay_grid(self, image):
+    overlay = np.copy(image)
+    for x, y in self.best_grid:
+      cv.circle(overlay, (x, y), 3, 255, -1)
+    show_wait_destroy('overlay', overlay)
+
 if __name__ == "__main__":
   # [load_image]
   # Check number of arguments
@@ -261,4 +275,4 @@ if __name__ == "__main__":
   if len(argv) == 2:
     display = argv[1] == "--display"
   chessboard = ChessBoard(300, display)
-  chessboard.get_space_coordinates(src)
+  chessboard.locate_squares(src)
