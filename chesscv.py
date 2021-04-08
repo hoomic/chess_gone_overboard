@@ -216,7 +216,7 @@ class ChessBoard():
         cv.circle(gray, (x - self.resize // 3, y - self.resize // 3), 3, 255, -1)
       show_wait_destroy("filtered_corners", gray)
     # take median of distances and multiply by 8 for entire board side length
-    return int(np.median(distances)), filtered_corners
+    return int(np.median(distances)), list(set(filtered_corners))
 
   def detect_corners(self, gray, square_length):
     """
