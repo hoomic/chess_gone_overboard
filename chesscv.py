@@ -12,6 +12,12 @@ def show_wait_destroy(winname, img):
     cv.waitKey(0)
     cv.destroyWindow(winname)
 
+def rotate_image(image, angle):
+    (cX, cY) = (image.shape[0] // 2, image.shape[1] // 2)
+    rotation_matrix = cv.getRotationMatrix2D((cX, cY), angle, 1.0)
+    rotate = np.copy(image)
+    return cv.warpAffine(rotate, rotation_matrix, (image.shape[0], image.shape[1]))
+
 def generate_grid_coordinates(x, y, s):
   coordinates = []
   for i in range(9):
@@ -92,7 +98,7 @@ class ChessBoard():
     
     #rotate the image by that angle
     gray = self.rotate_image(gray)
-    center = self.rotate_image(center)
+    center = rotate_image(center, self.camera_angle)
 
     #find the best guess at square lengths 
     square_length, center_corners = self.get_square_length(center)
@@ -118,9 +124,6 @@ class ChessBoard():
     if self.display:
       self.overlay_grid(gray)
     self.set_board_coordinates(best_params)
-    if self.display:
-      for square in self.squares:
-        square.display(src)
 
   def get_board_angle(self, orig_gray, threshold):
     """ 
