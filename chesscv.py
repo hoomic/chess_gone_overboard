@@ -5,6 +5,7 @@
 import numpy as np
 import sys
 import cv2 as cv
+import chess
 
 def show_wait_destroy(winname, img):
     cv.imshow(winname, img)
@@ -48,20 +49,7 @@ def overlap_match_score(corners, grid, params):
   min_distances = np.min(distance_matrix, axis=0)
   return np.mean(min_distances)
 
-class Square():
-  """
-  object for a single square on the board
-  """
-  def __init__(self, board_coords, image_coords):
-    self.board_coords = board_coords
-    self.image_coords = image_coords
-    self.piece = '.'
-
-  def display(self, image):
-    x0, x1, y0, y1 = self.image_coords
-    show_wait_destroy("{},{}".format(*self.board_coords), image[y0:y1,x0:x1])
-
-class ChessBoard():
+class BoardDetector():
   def __init__(self, resize=300, display=False):
     self.resize = resize
     self.display = display
@@ -79,13 +67,18 @@ class ChessBoard():
       gray = cv.cvtColor(src, cv.COLOR_BGR2GRAY)
     else:
       gray = src
+    # if the image is too dark, wait for camera to adjust
+
+    if np.mean(gray) < 30:
+      return None
+
     # Apply adaptiveThreshold at the bitwise_not of gray, notice the ~ symbol
     gray = cv.bitwise_not(gray)
 
     #increase contrast using CLAHE
     tile_size = self.resize // 100
-    clahe = cv.createCLAHE(clipLimit=10.0, tileGridSize=(tile_size, tile_size))
-    gray = clahe.apply(gray)
+    self.clahe = cv.createCLAHE(clipLimit=10.0, tileGridSize=(tile_size, tile_size))
+    gray = self.clahe.apply(gray)
     gray = cv.bilateralFilter(gray,5,50,50)
     if self.display:
       show_wait_destroy("clahe", gray)
@@ -123,7 +116,9 @@ class ChessBoard():
     self.best_grid = best_grid
     if self.display:
       self.overlay_grid(gray)
-    self.set_board_coordinates(best_params)
+    x, y, s = best_params
+    self.board_coords = (x, x + 8 * s, y, y + 8 * s)
+    return best_params
 
   def get_board_angle(self, orig_gray, threshold):
     """ 
@@ -245,22 +240,24 @@ class ChessBoard():
     rotate = np.copy(image)
     return cv.warpAffine(rotate, self.rotation_matrix, (self.resize, self.resize))
 
-  def set_board_coordinates(self, params):
-    self.squares = []
-    x, y ,s = params
-    for i in range(8):
-      x_lo = x + i * s
-      x_hi = x + (i + 1) * s
-      for j in range(8):
-        y_lo = y + j * s
-        y_hi = y + (j + 1) * s
-        self.squares.append(Square((i, j), (x_lo, x_hi, y_lo, y_hi)))
+  def crop_to_board(self, image):
+    x_lo, x_hi, y_lo, y_hi = self.board_coords
+    return image[y_lo:y_hi, x_lo:x_hi]
   
   def overlay_grid(self, image):
     overlay = np.copy(image)
     for x, y in self.best_grid:
       cv.circle(overlay, (x, y), 3, 255, -1)
     show_wait_destroy('overlay', overlay)
+
+  def transform_image(self, image):
+    if len(image.shape) != 2:
+      image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    image = cv.resize(image, (self.resize, self.resize), interpolation=cv.INTER_AREA)
+    image = self.clahe.apply(image)
+    image = self.rotate_image(image)
+    image = self.crop_to_board(image)
+    return image
 
 if __name__ == "__main__":
   # [load_image]
@@ -277,5 +274,5 @@ if __name__ == "__main__":
   display = False
   if len(argv) == 2:
     display = argv[1] == "--display"
-  chessboard = ChessBoard(300, display)
+  chessboard = BoardDetector(300, display)
   chessboard.locate_squares(src)
