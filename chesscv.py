@@ -222,8 +222,18 @@ class BoardDetector():
     corners = cv.goodFeaturesToTrack(gray, 120, 0.001, square_length - 1)
     corners = np.int0(corners)
     all_corners = []
+    tan_theta = np.tan(np.radians(self.camera_angle))
+    border = 3
     for i, c in enumerate(corners):
       x, y = c.ravel()
+      if x <= max(border, (y-self.resize/2) * tan_theta + border):
+        continue
+      elif x >= min(self.resize - border, self.resize - (self.resize/2 - y) * tan_theta - border):
+        continue
+      elif y <= max(border, (x - self.resize/2) * tan_theta + border):
+        continue
+      elif y >= min(self.resize - border, self.resize - (self.resize/2 - x) * tan_theta - border):
+        continue
       all_corners.append((x, y))
       if self.display:
         cv.circle(image, (x, y), 2, 255, -1)
