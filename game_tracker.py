@@ -56,13 +56,29 @@ class Square():
   def __init__(self, board_coords, image_coords):
     self.board_coords = board_coords
     self.image_coords = image_coords
+    x0, x1, y0, y1 = image_coords
+    tile_size = ((x1 - x0) + (y1 - y0)) // 10
+    self.clahe = cv.createCLAHE(clipLimit=10.0, tileGridSize=(tile_size, tile_size))
     self.piece = '.'
+    self.frames = []
 
   def detect_difference(self, prev_image, curr_image):
     last_square = self.get_image(prev_image)
+    if not len(self.frames):
+      self.frames.append(last_square)
     square = self.get_image(curr_image)
+    self.frames.append(square)
+    w, h = square.shape
     delta = cv.absdiff(last_square, square)
-    if np.mean(delta) > 25:
+    corr = np.corrcoef(last_square.flatten(), square.flatten())[0,1]
+    center_delta = delta[w//3:(2*w)//3, h//3:(2*h)//3]
+    if np.median(delta) > 18: #TODO make this more robust
+      self.display_frames()
+      cv.imshow('last', last_square)
+      cv.imshow('curr', square)
+      cv.imshow('{},{},{}'.format(*np.percentile(center_delta, [50,100]), np.mean(center_delta)), center_delta)
+      show_wait_destroy('{},{},{}'.format(*np.percentile(delta, [50,100]), s), delta)
+      cv.destroyWindow('{},{},{}'.format(*np.percentile(center_delta, [50,100]), np.mean(center_delta)))
       return self.board_coords
     return None
 
@@ -73,6 +89,13 @@ class Square():
   def display(self, image):
     square = self.get_image(image)
     show_wait_destroy("{},{}".format(*self.board_coords), square)
+
+  def display_frames(self):
+    if len(self.frames) < 10:
+      return
+    for i, frame in enumerate(self.frames[-10:]):
+      cv.imshow(str(i), frame)
+    cv.waitKey(0)
 
 class MoveTracker():
   """
@@ -112,40 +135,68 @@ class MoveTracker():
         return
       elif len(square_changes) > 4:
         # If more than 4 squares change, this is also not possible
-        #import pdb; pdb.set_trace()
+#        import pdb; pdb.set_trace()
         return
       else:
         move = self.process_move(square_changes)
-        #if move is not None:
-        #  show_wait_destroy(move.uci(), frame)
-        print(self.board)
-        print('-' * 50)
+        if move is not None:
+          show_wait_destroy(move.uci(), frame)
+          print(self.board)
+          print('-' * 50)
       self.last_still_frame = frame
     self.prev_frame = frame
 
   def process_move(self, square_changes):
     if self.white_side is None:
       #this should be the first move
-      if np.all([s[0] <= 4 for s in square_changes]):
+      if np.all([s[1] <= 4 for s in square_changes]):
         self.white_side = 'left'
-      elif np.all([s[0 > 4] for s in square_changes]):
+      elif np.all([s[1] > 4 for s in square_changes]):
         self.white_side = 'right'
       else:
         import pdb; pdb.set_trace()
     move = None
+    square_changes = [self.get_square(s) for s in square_changes]
     if len(square_changes) == 2: # "normal" move
-      s0 = self.get_square(square_changes[0])
-      s1 = self.get_square(square_changes[1])
+      s0, s1 = square_changes
       try:
         move = self.board.find_move(s0, s1)
       except ValueError:
-        move = self.board.find_move(s1, s0)
+        try:
+          move = self.board.find_move(s1, s0)
+        except ValueError:
+          # if a move is not identified, it is probably just noise
+          #import pdb; pdb.set_trace()
+          return
     elif len(square_changes) == 3: # en passant move
       if not self.board.has_legal_en_passant():
+        import pdb; pdb.set_trace()
         raise InvalidMove("En passant attempted when not legal")
-      pass
+      ep_square = chess.Square(self.board.ep_square)
+      try:
+        s_dest = [s for s in square_changes if s == ep_square][0]
+      except:
+        import pdb; pdb.set_trace()
+      s0, s1 = [s for s in square_changes if s != ep_square]
+      try:
+        move = self.board.find_move(s0, s_dest)
+      except ValueError:
+        move = self.board.find_move(s1, s_dest)
     elif len(square_changes) == 4: # castle
-      pass
+      if self.board.turn == chess.WHITE:
+        king_square = chess.square(4,0)
+        if chess.square(6,0) in square_changes:
+          move = self.board.find_move(king_square, chess.square(6,0))
+        elif chess.square(2,0) in square_changes:
+          move = self.board.find_move(king_square, chess.square(2,0))
+        else:
+          import pdb; pdb.set_trace()
+      else:
+        king_square = chess.square(4,7)
+        if chess.square(6,7) in square_changes:
+          move = self.board.find_move(king_square, chess.square(6,7))
+        elif chess.square(2,7) in square_changes:
+          move = self.board.find_move(king_square, chess.square(2,7))
     if move is None:
       return
     self.board.push(move)
