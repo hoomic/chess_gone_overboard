@@ -6,6 +6,7 @@ import numpy as np
 import sys
 import cv2 as cv
 import chess
+from collections import defaultdict
 
 def show_wait_destroy(winname, img):
     cv.imshow(winname, img)
@@ -56,7 +57,6 @@ class BoardDetector():
 
   def locate_squares(self, src):
     src = cv.resize(src, (self.resize, self.resize), interpolation=cv.INTER_AREA)
-    overlay = np.copy(src)
 
     if self.display:
       # Show source image
@@ -113,12 +113,13 @@ class BoardDetector():
         best_params = params
         best_score = score
       grids.append((score, grid, params))
+    ps = self.get_perspective_shift(gray, best_params)
     self.best_grid = best_grid
     if self.display:
-      self.overlay_grid(gray)
+      self.overlay_grid(gray, best_params, ps)
     x, y, s = best_params
-    self.board_coords = (x, x + 8 * s, y, y + 8 * s)
-    return best_params
+    self.board_coords = (x - ps[0], x + 8 * s + ps[0], y - ps[0], y + 8 * s + ps[0])
+    return best_params, ps
 
   def get_board_angle(self, orig_gray, threshold):
     """ 
@@ -241,6 +242,36 @@ class BoardDetector():
       show_wait_destroy("all_corners", image)
     return all_corners
 
+  def get_perspective_shift(self, gray, board_params):
+    """ 
+    Since the center of the board is closer to the camera than the rest of the board,
+    outer squares can be more dilated than the center squares. This function uses the empty
+    squares on ranks 3:6 to determine how many more pixels to include for outer squares 
+    based on how far they are from the center.
+    """
+    x, y, s = board_params
+    #first look at squares that are 2 in from the edge. c3:c6 and f3:f6
+    perspective_shift = defaultdict(int)
+    for j in reversed(range(4)):
+      shift_values = []
+      for i in range(2, 6):
+        x_lo = x + i * s
+        x_hi = x + (i+1) * s
+        for upper in [True, False]:
+          y_lo = y + j * s + perspective_shift[j+1] if upper else y + (7-j) * s
+          y_hi = y + (j+1) * s - perspective_shift[j+1] if upper else y + (8-j) * s
+          line_averages = []
+          for y0 in range(y_lo, y_hi):
+            line_averages.append(np.mean(gray[y0, x_lo:x_hi]))
+          mean = np.mean(line_averages)
+          std = np.std(line_averages)
+          for k in range(10):
+            if abs((np.mean(gray[(y_lo -k) if upper else (y_hi + k), x_lo:x_hi]) - mean) / std) > 2.0:
+              shift_values.append(k)
+              break
+      perspective_shift[j] = int(np.mean(shift_values))
+    return perspective_shift
+
   def set_camera_angle(self, angle):
     (cX, cY) = (self.resize // 2, self.resize // 2)
     self.rotation_matrix = cv.getRotationMatrix2D((cX, cY), angle, 1.0)
@@ -253,18 +284,34 @@ class BoardDetector():
   def crop_to_board(self, image):
     x_lo, x_hi, y_lo, y_hi = self.board_coords
     return image[y_lo:y_hi, x_lo:x_hi]
-  
-  def overlay_grid(self, image):
+
+  def overlay_grid(self, image, params, perspective_shift):
     overlay = np.copy(image)
-    for x, y in self.best_grid:
-      cv.circle(overlay, (x, y), 3, 255, -1)
+    x, y ,s = params
+    for i in range(8):
+      p_i = min(i, 7-i)
+      lo_shift = -perspective_shift[p_i] if i < 4 else perspective_shift[p_i + 1]
+      hi_shift = -perspective_shift[p_i + 1] if i < 4 else perspective_shift[p_i]
+      x_lo = x + i * s + lo_shift
+      x_hi = x + (i + 1) * s + hi_shift
+      for j in range(8):
+        p_j = min(j, 7-j)
+        lo_shift = -perspective_shift[p_j] if j < 4 else perspective_shift[p_j + 1]
+        hi_shift = -perspective_shift[p_j + 1] if j < 4 else perspective_shift[p_j]
+        y_lo = y + j * s + lo_shift
+        y_hi = y + (j + 1) * s + hi_shift
+        cv.circle(overlay, (x_lo, y_lo), 3, 255, -1)
+        cv.circle(overlay, (x_lo, y_hi), 3, 255, -1)
+        cv.circle(overlay, (x_hi, y_lo), 3, 255, -1)
+        cv.circle(overlay, (x_hi, y_hi), 3, 255, -1)
     show_wait_destroy('overlay', overlay)
 
-  def transform_image(self, image):
-    if len(image.shape) != 2:
+  def transform_image(self, image, gray=True):
+    if len(image.shape) != 2 and gray:
       image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
     image = cv.resize(image, (self.resize, self.resize), interpolation=cv.INTER_AREA)
-    image = self.clahe.apply(image)
+    if gray:
+      image = self.clahe.apply(image)
     image = self.rotate_image(image)
     image = self.crop_to_board(image)
     return image
