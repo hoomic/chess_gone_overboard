@@ -129,7 +129,7 @@ class MoveTracker():
       elif len(move_candidates) > 1:
         move_made = self.check_for_castle(move_candidates)
         if not move_made:
-          move_made = filter_multiple_moves
+          move_made = self.filter_multiple_moves(move_candidates, frame)
           if not move_made: 
             import pdb; pdb.set_trace()
       if move_made is not None:
@@ -175,7 +175,7 @@ class MoveTracker():
         return True
     return False
 
-  def filter_multiple_moves(self, move_candidates):
+  def filter_multiple_moves(self, move_candidates, frame):
     # if all moves have the same from_square, then just look at the to squares
     if np.all([m.from_square == move_candidates[0].from_square for m in move_candidates]):
       deltas = []
