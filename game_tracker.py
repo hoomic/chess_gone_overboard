@@ -170,19 +170,21 @@ class MoveTracker():
     to_pred = self.get_piece_prediction(to_square.get_image(frame))
     from_delta = from_square.get_delta(self.last_still_frame, frame)
     to_delta = to_square.get_delta(self.last_still_frame, frame)
-    if np.median(from_delta) < 10 or np.median(to_delta) < 10:
+    if np.median(from_delta) < 15 or np.median(to_delta) < 15:
       return False
+    if np.median(from_delta) > 30 and np.median(to_delta) > 30:
+      return True
     if from_pred < -2 and to_pred > 0:
 #      cv.imshow('from_curr: {0:.3f}'.format(from_pred), from_square.get_image(frame))
 #      show_wait_destroy('to_curr: {0:.3f}'.format(to_pred), to_square.get_image(frame))
       return True
     # if the from square definitely doesn't have a piece, then take a closer look at
     # the to squares
-    elif from_pred < -3 and np.median(from_delta) > 25: 
+    elif from_pred < -3: 
       print("Taking a closer look at to_square")
       to_pred = self.get_piece_prediction(to_square.get_image(frame), True)
-#      cv.imshow('from_curr: {0:.3f}'.format(from_pred), from_square.get_image(frame))
-#      show_wait_destroy('to_curr: {0:.3f}'.format(to_pred), to_square.get_image(frame))
+      cv.imshow('from_curr: {0:.3f}'.format(from_pred), from_square.get_image(frame))
+      show_wait_destroy('to_curr: {0:.3f}'.format(to_pred), to_square.get_image(frame))
       if to_pred > 0 and np.median(to_delta) > 25:
         return True
     return False
