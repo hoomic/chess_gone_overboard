@@ -1,4 +1,5 @@
 import chess
+from chess import pgn
 from chesscv import BoardDetector, show_wait_destroy
 from piece_classifier import train_piece_classifier, get_piece_prediction
 
@@ -14,7 +15,7 @@ import numpy as np
 class InvalidMove(Exception):
   pass
 
-def track_game(video):
+def track_game(video, outfile):
   board_detector = BoardDetector(display=True)
   move_tracker = MoveTracker()
 
@@ -57,6 +58,17 @@ def track_game(video):
         move_tracker.train_piece_classifier(frame)
         classifier_trained = True
       move_tracker.process_image(frame)
+    output_game_to_file(move_tracker.board, outfile)
+
+def output_game_to_file(board, outfile):
+  game = pgn.Game()
+  node = None
+  for move in board.move_stack:
+    if node is None:
+      node = game.add_variation(move)
+    else:
+      node = node.add_variation(move)
+  print(game, file=open(outfile, 'w'), end='\n\n')
 
 class Square():
   """
@@ -277,10 +289,12 @@ if __name__ == "__main__":
   import argparse
   
   parser = argparse.ArgumentParser(description='Track a chess game over a live board')
-  parser.add_argument('--video', dest='video', default=None, help='path to video file')
+  parser.add_argument('-v', '--video', dest='video', default=None, help='path to video file')
+  parser.add_argument('-o', '--outfile', dest='outfile', default="./game.pgn"
+    , help='path to output pgn file')
 
   args = parser.parse_args()
 
-  track_game(args.video)
+  track_game(args.video, args.outfile)
 
 
