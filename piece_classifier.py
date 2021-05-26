@@ -11,10 +11,10 @@ class PieceClassifier(nn.Module):
     """Binary classifier to determine whether a square has a piece on it or not"""
     def __init__(self):
         super(PieceClassifier, self).__init__()
-        self.conv1 = nn.Conv2d(1, 16, 5)
+        self.conv1 = nn.Conv2d(1, 8, 5)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(16, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 128)
+        self.conv2 = nn.Conv2d(8, 8, 5)
+        self.fc1 = nn.Linear(8 * 5 * 5, 128)
         self.fc2 = nn.Linear(128, 1)
 
     def forward(self, x):
